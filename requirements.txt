@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+requests
+chromadb
+pdfplumber
+python-multipart
+python-dotenv
+rank_bm25
+sentence-transformers
+ragas
+langchain-ollama
+bcrypt
+python-jose[cryptography]
