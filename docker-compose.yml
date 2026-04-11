@@ -1,45 +1,30 @@
 version: '3.8'
 
 services:
-  # The NGINX and React container
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "80:80"       # Web interface accessible directly at localhost:80
+      - "80:80"
     depends_on:
       - backend
 
-  # The Python / FastAPI container
   backend:
     build:
-      context: .      # Context relies on root location to access requirements.txt
+      context: .
       dockerfile: backend/Dockerfile
     ports:
-      - "8000:8000"   # Exposed for potential direct API testing via Postman/cURL
+      - "8000:8000"
     environment:
-      # Inject overriding paths here so they automatically adapt to Docker networking!
-      - SECRET_KEY=${SECRET_KEY:-override_this_in_production_with_real_key}
+      - SECRET_KEY=${SECRET_KEY}
       - CORS_ORIGINS=http://localhost
-      - OLLAMA_BASE_URL=http://ollama:11434
-      - CHROMA_PERSIST_PATH=/app/chroma_db/
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - EMBED_MODEL=${EMBED_MODEL:-models/gemini-embedding-001}
+      - CHROMA_PERSIST_PATH=/app/chroma_db
     volumes:
-      - ./chroma_db:/app/chroma_db      # Keeps vector IDs from resetting each boot
-      - ./users.db:/app/users.db        # Keeps DB records permanent 
-      - hf_cache:/root/.cache/huggingface # Mounts HF models cache preventing repetitive 1GB model downloads
-    depends_on:
-      - ollama
+      - ./chroma_db:/app/chroma_db
+      - ./users.db:/app/users.db
 
-  # The local Ollama LLM Container
-  ollama:
-    image: ollama/ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama       # Ensures downloaded llama3.2 persists locally
-
-# Defined volumes (managed dynamically by Docker)
-volumes:
-  ollama_data:
-  hf_cache:
+volumes: {}

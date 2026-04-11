@@ -7,12 +7,12 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(dotenv_path=PROJECT_ROOT / ".env")
 
-# ── Ollama (local LLM) ──────────────────────────────────────────
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
+# ── Gemini (Google LLM & Embeddings) ──────────────────────────
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
-# ── Local embeddings (sentence-transformers) ─────────────────────
-EMBED_MODEL = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
+# ── Embeddings (Google) ─────────────────────
+EMBED_MODEL = os.getenv("EMBED_MODEL", "models/gemini-embedding-001")
 
 # ── ChromaDB ─────────────────────────────────────────────────────
 CHROMA_PERSIST_PATH = os.getenv("CHROMA_PERSIST_PATH", "./chroma_db")

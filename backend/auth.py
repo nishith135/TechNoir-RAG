@@ -65,10 +65,6 @@ def _create_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
 
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, Any]:
-    """
-    Dependency that validates the JWT from the Authorization header
-    and returns the user payload.
-    """
     token = credentials.credentials
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -84,10 +80,10 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 # ─── Routes ────────────────────────────────────────────────────
 @router.post("/register", response_model=TokenResponse)
 async def register(req: RegisterRequest):
-    if len(req.username) < 2:
-        raise HTTPException(status_code=400, detail="Username must be at least 2 characters.")
-    if len(req.password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+    if len(req.username) < 2 or len(req.username) > 50:
+        raise HTTPException(status_code=400, detail="Username must be between 2 and 50 characters.")
+    if len(req.password) < 6 or len(req.password) > 72:
+        raise HTTPException(status_code=400, detail="Password must be between 6 and 72 characters.")
 
     conn = get_connection()
     try:

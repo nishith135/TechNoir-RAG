@@ -7,7 +7,6 @@ python-multipart
 python-dotenv
 rank_bm25
 sentence-transformers
-ragas
-langchain-ollama
+google-generativeai
 bcrypt
 python-jose[cryptography]

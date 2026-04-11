@@ -1,41 +1,55 @@
 import os
+import re
 import tempfile
+import traceback
 import uuid
+
+import chromadb
+import google.generativeai as genai
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List
 
-import chromadb
-import requests
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from contextlib import asynccontextmanager
-
-from backend.config import CHROMA_PERSIST_PATH, OLLAMA_BASE_URL, OLLAMA_MODEL
-from backend.ingest import ingest_pdf, _get_embed_model
+from backend.config import CHROMA_PERSIST_PATH, GEMINI_API_KEY, GEMINI_MODEL
+from backend.ingest import ingest_pdf
 from backend.prompts import SYSTEM_PROMPT, build_user_prompt
 from backend.retrieval import hybrid_retrieve, _get_cross_encoder
-from backend.evaluate import evaluate_rag
 from backend.auth import router as auth_router, get_current_user
 
+# ─── Initialization ────────────────────────────────────────────
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Preload models on application startup."""
-    print("Preloading embedding models...")
-    _get_embed_model()
+    """Preload cross-encoder on startup so the first query isn't cold."""
+    print("Preloading cross-encoder model...")
     _get_cross_encoder()
-    print("Models loaded successfully.")
+    print("Models loaded. Ready.")
     yield
-
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(auth_router)
 
-# Read CORS origins from env, default to local Vite/React ports for DEV
+# ─── Global error handler ──────────────────────────────────────
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    with open("error.log", "a") as f:
+        f.write(f"\nError on {request.method} {request.url}:\n")
+        traceback.print_exc(file=f)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal Server Error: {exc}"},
+    )
+
+# ─── CORS ──────────────────────────────────────────────────────
 origins_str = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000")
-allow_origins_list = [origin.strip() for origin in origins_str.split(",") if origin.strip()]
+allow_origins_list = [o.strip() for o in origins_str.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,115 +59,103 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
+# ─── Schemas ───────────────────────────────────────────────────
 class QueryRequest(BaseModel):
     question: str
     collection: str
     k: int = 5
 
-
+# ─── Helpers ──────────────────────────────────────────────────
 def _get_tmp_dir() -> Path:
-    tmp_dir = Path("/tmp")
     try:
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        return tmp_dir
+        tmp = Path(tempfile.gettempdir())
+        tmp.mkdir(parents=True, exist_ok=True)
+        return tmp
     except Exception:
-        return Path(tempfile.gettempdir())
+        return Path(".")
 
+def _sanitize_name(name: str, max_len: int = 40) -> str:
+    """Convert an arbitrary string into a ChromaDB-safe name component."""
+    name = re.sub(r"[^a-zA-Z0-9._-]", "_", name)
+    name = re.sub(r"^[^a-zA-Z0-9]+", "", name)
+    name = re.sub(r"[^a-zA-Z0-9]+$", "", name)
+    return name[:max_len] or "doc"
 
-def generate_llm_response(prompt: str) -> str:
-    """Generate a response from the local Ollama LLM."""
+def _user_prefix(email: str) -> str:
+    """Derive a short, ChromaDB-safe prefix from a user's email."""
+    return _sanitize_name(email, max_len=24) or "user"
+
+def _scoped_collection(email: str, display_name: str) -> str:
+    """Internal ChromaDB name: {user_prefix}__{display_name} (max 63 chars)."""
+    return f"{_user_prefix(email)}__{display_name}"[:63]
+
+def _display_name(email: str, scoped: str) -> str:
+    """Strip the user prefix from a scoped collection name."""
+    prefix = _user_prefix(email) + "__"
+    return scoped[len(prefix):] if scoped.startswith(prefix) else scoped
+
+def _generate_llm_response(prompt: str) -> str:
+    """Generate a response from Gemini."""
     try:
-        response = requests.post(
-            f"{OLLAMA_BASE_URL}/api/generate",
-            json={
-                "model": OLLAMA_MODEL,
-                "prompt": prompt,
-                "stream": False,
-                "keep_alive": "1h",
-            },
-            timeout=300,
-        )
-        response.raise_for_status()
-        return response.json().get("response", "").strip()
-    except requests.exceptions.ConnectionError:
-        return "LLM error: Cannot connect to Ollama. Make sure Ollama is running (ollama serve)."
-    except requests.exceptions.Timeout:
-        return "LLM error: Request timed out (300s). The model may be loading or hardware is slow — try again."
+        model = genai.GenerativeModel(GEMINI_MODEL)
+        response = model.generate_content(prompt)
+        return response.text.strip() if response.text else "LLM returned an empty response."
     except Exception as e:
-        return f"LLM error: {str(e)}"
+        return f"LLM error: {e}"
 
+# ─── Endpoints ────────────────────────────────────────────────
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "gemini_configured": bool(GEMINI_API_KEY)}
 
 @app.post("/upload")
-async def upload_pdf(file: UploadFile = File(...), user: dict = Depends(get_current_user)) -> Dict[str, Any]:
+async def upload_pdf(
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
+) -> Dict[str, Any]:
     if not file.filename:
-        raise HTTPException(status_code=400, detail="Missing uploaded filename.")
-
-    filename_lower = file.filename.lower()
-    if not filename_lower.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Missing filename.")
+    if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
-    tmp_dir = _get_tmp_dir()
-    suffix = Path(file.filename).suffix.lower()
-    tmp_path = tmp_dir / f"{uuid.uuid4().hex}{suffix}"
+    safe_filename = os.path.basename(file.filename)
+    tmp_path = _get_tmp_dir() / f"{uuid.uuid4().hex}.pdf"
 
-    collection_name = Path(file.filename).stem
+    display_name = _sanitize_name(Path(safe_filename).stem)
+    collection_name = _scoped_collection(user["email"], display_name)
 
     try:
-        data = await file.read()
-        tmp_path.write_bytes(data)
-        return ingest_pdf(file_path=str(tmp_path), collection_name=collection_name)
+        tmp_path.write_bytes(await file.read())
+        result = ingest_pdf(file_path=str(tmp_path), collection_name=collection_name)
+        result["collection"] = display_name  # return display name to frontend
+        return result
     finally:
-        try:
-            if tmp_path.exists():
-                tmp_path.unlink()
-        except Exception:
-            pass
-
+        tmp_path.unlink(missing_ok=True)
 
 @app.post("/query")
-async def query(req: QueryRequest, user: dict = Depends(get_current_user)) -> Dict[str, Any]:
-    chunks = hybrid_retrieve(
-        query=req.question, collection_name=req.collection, k=req.k)
-    user_prompt = build_user_prompt(question=req.question, chunks=chunks)
-
-    # Combine system prompt + user prompt for Ollama (single-turn)
-    full_prompt = f"{SYSTEM_PROMPT}\n\n{user_prompt}"
-    answer = generate_llm_response(full_prompt)
+async def query(
+    req: QueryRequest,
+    user: dict = Depends(get_current_user),
+) -> Dict[str, Any]:
+    scoped = _scoped_collection(user["email"], req.collection)
+    chunks = hybrid_retrieve(query=req.question, collection_name=scoped, k=req.k)
+    full_prompt = f"{SYSTEM_PROMPT}\n\n{build_user_prompt(question=req.question, chunks=chunks)}"
+    answer = _generate_llm_response(full_prompt)
 
     sources: List[Dict[str, Any]] = [
-        {"page": int(c.get("page", -1)), "source": c.get("source", ""), "distance": float(c.get("distance", 0.0))}
+        {
+            "page": int(c.get("page", -1)),
+            "source": c.get("source", ""),
+            "distance": float(c.get("distance", 0.0)),
+        }
         for c in chunks
     ]
-
     return {"answer": answer, "sources": sources}
-
 
 @app.get("/collections")
 async def list_collections(user: dict = Depends(get_current_user)) -> Dict[str, Any]:
-    chroma_client = chromadb.PersistentClient(path=CHROMA_PERSIST_PATH)
-    collections = chroma_client.list_collections()
-    if collections and isinstance(collections[0], str):
-        names = collections
-    else:
-        names = [c.name for c in collections]
-    return {"collections": names}
-
-
-_TEST_QUESTIONS = [
-    "What is the main topic of this document?",
-    "What are the key findings or conclusions?",
-    "What methodology or approach is described?",
-    "Who are the primary authors or contributors mentioned?",
-    "What recommendations are provided?",
-]
-
-
-@app.get("/evaluate")
-async def evaluate_endpoint(collection: str, user: dict = Depends(get_current_user)) -> Dict[str, Any]:
-    """Run ragas evaluation on hardcoded test questions."""
-    scores = evaluate_rag(
-        test_questions=_TEST_QUESTIONS,
-        collection_name=collection,
-    )
-    return {"scores": scores, "num_questions": len(_TEST_QUESTIONS)}
+    client = chromadb.PersistentClient(path=CHROMA_PERSIST_PATH)
+    all_names = [c.name for c in client.list_collections()]
+    prefix = _user_prefix(user["email"]) + "__"
+    user_names = [_display_name(user["email"], n) for n in all_names if n.startswith(prefix)]
+    return {"collections": user_names}

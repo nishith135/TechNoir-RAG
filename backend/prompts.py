@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import List
 
-from backend.config import OLLAMA_MODEL
+from backend.config import GEMINI_MODEL
 
 SYSTEM_PROMPT: str = (
-    f"You are a RAG assistant using the model `{OLLAMA_MODEL}`.\n\n"
+    f"You are a RAG assistant using the model `{GEMINI_MODEL}`.\n\n"
     "Answer ONLY using the provided context. "
     "If the answer is not in the context, respond with "
     "\"I don't have enough information in the provided document to answer that.\""

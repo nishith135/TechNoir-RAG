@@ -103,7 +103,7 @@ function SettingsPanel({ onClose, user, onLogout }) {
                 Chat Model
               </span>
               <span className="text-sm text-on-surface font-mono bg-surface-container-lowest px-3 py-1 rounded">
-                llama3.2:1b (Ollama)
+                Gemini 1.5 Flash
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -111,7 +111,7 @@ function SettingsPanel({ onClose, user, onLogout }) {
                 Embedding Model
               </span>
               <span className="text-sm text-on-surface font-mono bg-surface-container-lowest px-3 py-1 rounded">
-                all-MiniLM-L6-v2
+                gemini-embedding-001
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -1103,7 +1103,7 @@ function MainApp({ user, logout, authFetch }) {
                           <span className="material-symbols-outlined text-sm">
                             settings_input_component
                           </span>
-                          Model: Llama-3 (Local)
+                          Model: Gemini 1.5 Flash
                         </button>
                         <button className="flex items-center gap-1 hover:text-on-surface transition-colors">
                           <span className="material-symbols-outlined text-sm">

@@ -9,27 +9,31 @@ from backend.config import (
     CHUNK_SIZE,
     CHROMA_PERSIST_PATH,
     EMBED_MODEL,
+    GEMINI_API_KEY,
 )
 
 
-# ── Local embedding model (lazy-loaded) ──────────────────────────
-_embed_model = None
+import google.generativeai as genai
 
-
-def _get_embed_model():
-    """Lazy-load the sentence-transformers embedding model."""
-    global _embed_model
-    if _embed_model is None:
-        from sentence_transformers import SentenceTransformer
-        _embed_model = SentenceTransformer(EMBED_MODEL)
-    return _embed_model
-
+# Configure GenAI globally (can also be done in main.py)
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 def _embed_texts(texts: List[str]) -> List[List[float]]:
-    """Embed a list of texts using a local sentence-transformers model."""
-    model = _get_embed_model()
-    embeddings = model.encode(texts, show_progress_bar=False)
-    return embeddings.tolist()
+    """Embed a list of texts using Google Gemini."""
+    if not texts:
+        return []
+    embeddings = []
+    batch_size = 100
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i + batch_size]
+        result = genai.embed_content(
+            model=EMBED_MODEL,
+            content=batch,
+            task_type="retrieval_document"
+        )
+        embeddings.extend(result['embedding'])
+    return embeddings
 
 
 # ── Text chunking ────────────────────────────────────────────────

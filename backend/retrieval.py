@@ -5,27 +5,22 @@ from typing import Any, Dict, List
 import chromadb
 from rank_bm25 import BM25Okapi
 
-from backend.config import CHROMA_PERSIST_PATH, EMBED_MODEL
+from backend.config import CHROMA_PERSIST_PATH, EMBED_MODEL, GEMINI_API_KEY
+import google.generativeai as genai
 
-
-# ── Local embedding model (lazy-loaded, shared with ingest) ──────
-_embed_model = None
-
-
-def _get_embed_model():
-    """Lazy-load the sentence-transformers embedding model."""
-    global _embed_model
-    if _embed_model is None:
-        from sentence_transformers import SentenceTransformer
-        _embed_model = SentenceTransformer(EMBED_MODEL)
-    return _embed_model
-
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 def _embed_query(query: str) -> List[float]:
-    """Embed a single query using local sentence-transformers model."""
-    model = _get_embed_model()
-    embedding = model.encode(query, show_progress_bar=False)
-    return embedding.tolist()
+    """Embed a single query using Google Gemini."""
+    if not query:
+        return []
+    result = genai.embed_content(
+        model=EMBED_MODEL,
+        content=query,
+        task_type="retrieval_query"
+    )
+    return result['embedding']
 
 
 def retrieve_chunks(query: str, collection_name: str, k: int = 5) -> list[dict]:
@@ -38,7 +33,10 @@ def retrieve_chunks(query: str, collection_name: str, k: int = 5) -> list[dict]:
     query_embedding = _embed_query(query)
 
     chroma_client = chromadb.PersistentClient(path=CHROMA_PERSIST_PATH)
-    collection = chroma_client.get_collection(name=collection_name)
+    try:
+        collection = chroma_client.get_collection(name=collection_name)
+    except chromadb.errors.NotFoundError:
+        return []
 
     result = collection.query(
         query_embeddings=[query_embedding],
