@@ -6,38 +6,7 @@ Powered by Google's Gemini API, advanced hybrid vector search, and cross-encoder
 
 ---
 
-## 📸 Screenshots
 
-*(Replace these image paths with actual screenshots of your application)*
-
-<p align="center">
-  <img src="https://via.placeholder.com/800x400/121212/8B5CF6?text=Main+Workspace+View" width="800" alt="Main Split-pane Workspace">
-  <br>
-  <em>The main analysis workspace with synchronized PDF viewing and LLM chat</em>
-</p>
-
-<details>
-<summary><strong>View more screenshots</strong></summary>
-
-<p align="center">
-  <img src="https://via.placeholder.com/400x300/121212/8B5CF6?text=Login+Screen" width="400" alt="Secure Login Screen">
-  <br>
-  <em>Secure JWT Authentication Portal</em>
-</p>
-
-<p align="center">
-  <img src="https://via.placeholder.com/800x400/121212/8B5CF6?text=Analytics+Dashboard" width="800" alt="Analytics Dashboard">
-  <br>
-  <em>Interactive System Telemetry and Analytics</em>
-</p>
-
-<p align="center">
-  <img src="https://via.placeholder.com/800x400/121212/8B5CF6?text=Citation+System" width="800" alt="Citation popups">
-  <br>
-  <em>Dynamic Citation popups showing Euclidean distances</em>
-</p>
-
-</details>
 
 ---
 
