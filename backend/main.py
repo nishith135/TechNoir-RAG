@@ -25,15 +25,7 @@ from backend.auth import router as auth_router, get_current_user
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Preload cross-encoder on startup so the first query isn't cold."""
-    print("Preloading cross-encoder model...")
-    _get_cross_encoder()
-    print("Models loaded. Ready.")
-    yield
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 app.include_router(auth_router)
 
 # ─── Global error handler ──────────────────────────────────────
