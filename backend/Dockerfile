@@ -22,4 +22,4 @@ ENV PYTHONPATH=/app
 EXPOSE 10000
 
 # Start FastAPI using Render's PORT environment variable
-CMD uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-10000}
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-10000}"]

@@ -40,13 +40,11 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 # ─── CORS ──────────────────────────────────────────────────────
-origins_str = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000")
-allow_origins_list = [o.strip() for o in origins_str.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allow_origins_list,
-    allow_credentials=True,
+    allow_origins=["*"],  # Allow all origins for testing
+    allow_credentials=False, # Must be False when origins is ["*"]
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -96,6 +94,10 @@ def _generate_llm_response(prompt: str) -> str:
         return f"LLM error: {e}"
 
 # ─── Endpoints ────────────────────────────────────────────────
+@app.get("/")
+async def root():
+    return {"message": "Welcome to the TechNoir RAG API!", "docs": "/docs"}
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "gemini_configured": bool(GEMINI_API_KEY)}
