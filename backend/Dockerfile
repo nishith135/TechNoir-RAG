@@ -1,23 +1,25 @@
 FROM python:3.11-slim
 
+# Set working directory to /app
 WORKDIR /app
 
-# Install system dependencies (build-essential needed for compiling C-extensions in some python packages)
+# Install system dependencies
 RUN apt-get update && apt-get install -y build-essential curl && rm -rf /var/lib/apt/lists/*
 
-# Copy root requirements file directly into /app
+# Copy requirements from the build context (which is the backend directory)
 COPY requirements.txt .
 
 # Install Python requirements cleanly
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the backend sub-folder specifically
-COPY backend /app/backend
+# Copy all contents of the build context (backend/) into /app/backend
+COPY . /app/backend
 
 # Set Python path so `import backend.X` works perfectly naturally
 ENV PYTHONPATH=/app
 
-EXPOSE 8000
+# Expose port 10000 for Render
+EXPOSE 10000
 
-# Fire up FastAPI on 0.0.0.0 to securely map it out of the container
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start FastAPI on port 10000
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "10000"]
