@@ -1,7 +1,7 @@
 import os
 import re
+import logging
 import tempfile
-import traceback
 import uuid
 
 import chromadb
@@ -21,9 +21,17 @@ from backend.prompts import SYSTEM_PROMPT, build_user_prompt
 from backend.retrieval import hybrid_retrieve, _get_cross_encoder
 from backend.auth import router as auth_router, get_current_user
 
+# ─── Setup Logging ─────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
 # ─── Initialization ────────────────────────────────────────────
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
+    logger.info("Gemini API key configured.")
 
 app = FastAPI()
 app.include_router(auth_router)
@@ -31,9 +39,7 @@ app.include_router(auth_router)
 # ─── Global error handler ──────────────────────────────────────
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    with open("error.log", "a") as f:
-        f.write(f"\nError on {request.method} {request.url}:\n")
-        traceback.print_exc(file=f)
+    logger.error(f"Error on {request.method} {request.url}: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
         content={"detail": f"Internal Server Error: {exc}"},
@@ -41,9 +47,11 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # ─── CORS ──────────────────────────────────────────────────────
 
+# Allow all origins for testing. 
+# IN PRODUCTION: Change ["*"] to your specific frontend URL (e.g., ["https://yourdomain.com"])
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for testing
+    allow_origins=["*"],  
     allow_credentials=False, # Must be False when origins is ["*"]
     allow_methods=["*"],
     allow_headers=["*"],
@@ -102,6 +110,10 @@ async def root():
 async def health_check():
     return {"status": "ok", "gemini_configured": bool(GEMINI_API_KEY)}
 
+@app.get("/version")
+async def version():
+    return {"version": "1.0.0"}
+
 @app.post("/upload")
 async def upload_pdf(
     file: UploadFile = File(...),
@@ -119,10 +131,15 @@ async def upload_pdf(
     collection_name = _scoped_collection(user["email"], display_name)
 
     try:
+        logger.info(f"Uploading file: {safe_filename} for user: {user['email']}")
         tmp_path.write_bytes(await file.read())
         result = ingest_pdf(file_path=str(tmp_path), collection_name=collection_name)
         result["collection"] = display_name  # return display name to frontend
+        logger.info(f"Successfully processed file: {safe_filename}")
         return result
+    except Exception as e:
+        logger.error(f"Error processing file {safe_filename}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         tmp_path.unlink(missing_ok=True)
 
@@ -131,10 +148,16 @@ async def query(
     req: QueryRequest,
     user: dict = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    scoped = _scoped_collection(user["email"], req.collection)
-    chunks = hybrid_retrieve(query=req.question, collection_name=scoped, k=req.k)
-    full_prompt = f"{SYSTEM_PROMPT}\n\n{build_user_prompt(question=req.question, chunks=chunks)}"
-    answer = _generate_llm_response(full_prompt)
+    try:
+        logger.info(f"Querying collection '{req.collection}' for user: {user['email']}")
+        scoped = _scoped_collection(user["email"], req.collection)
+        chunks = hybrid_retrieve(query=req.question, collection_name=scoped, k=req.k)
+        full_prompt = f"{SYSTEM_PROMPT}\n\n{build_user_prompt(question=req.question, chunks=chunks)}"
+        answer = _generate_llm_response(full_prompt)
+        logger.info("Successfully generated query answer.")
+    except Exception as e:
+        logger.error(f"Error querying collection {req.collection}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Query Error: {e}")
 
     sources: List[Dict[str, Any]] = [
         {
