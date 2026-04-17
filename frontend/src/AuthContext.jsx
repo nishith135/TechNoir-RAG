@@ -11,6 +11,9 @@ const AuthContext = createContext(null);
 const TOKEN_KEY = "rag_token";
 const USER_KEY = "rag_user";
 
+const envUrl = import.meta.env.VITE_API_URL;
+const API_URL = (envUrl && envUrl !== "undefined") ? envUrl.replace(/\/+$/, "") : "";
+
 export function AuthProvider({ children }) {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY));
   const [user, setUser] = useState(() => {
@@ -25,7 +28,7 @@ export function AuthProvider({ children }) {
       setLoading(false);
       return;
     }
-    fetch("/auth/me", {
+    fetch(`${API_URL}/auth/me`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => {
@@ -47,7 +50,7 @@ export function AuthProvider({ children }) {
   }, [token]);
 
   const login = useCallback(async (email, password) => {
-    const res = await fetch("/auth/login", {
+    const res = await fetch(`${API_URL}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
@@ -56,7 +59,9 @@ export function AuthProvider({ children }) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || "Login failed.");
     }
-    const data = await res.json();
+    const data = await res.json().catch(() => {
+      throw new Error("Received malformed response from the server.");
+    });
     setToken(data.access_token);
     setUser({ username: data.username, email: data.email });
     localStorage.setItem(TOKEN_KEY, data.access_token);
@@ -68,7 +73,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   const register = useCallback(async (username, email, password) => {
-    const res = await fetch("/auth/register", {
+    const res = await fetch(`${API_URL}/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, email, password }),
@@ -77,7 +82,9 @@ export function AuthProvider({ children }) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || "Registration failed.");
     }
-    const data = await res.json();
+    const data = await res.json().catch(() => {
+      throw new Error("Received malformed response from the server.");
+    });
     setToken(data.access_token);
     setUser({ username: data.username, email: data.email });
     localStorage.setItem(TOKEN_KEY, data.access_token);
@@ -102,7 +109,7 @@ export function AuthProvider({ children }) {
         ...options.headers,
         Authorization: `Bearer ${token}`,
       };
-      const res = await fetch(url, { ...options, headers });
+      const res = await fetch(`${API_URL}${url}`, { ...options, headers });
       if (res.status === 401) {
         logout();
         throw new Error("Session expired. Please log in again.");
