@@ -12,10 +12,10 @@ from typing import Any, Dict, List
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 
-from backend.config import CHROMA_PERSIST_PATH, GEMINI_API_KEY, GEMINI_MODEL
+from backend.config import CHROMA_PERSIST_PATH, GEMINI_API_KEY, GEMINI_MODEL, PDF_STORE_PATH
 from backend.ingest import ingest_pdf
 from backend.prompts import SYSTEM_PROMPT, build_user_prompt
 from backend.retrieval import hybrid_retrieve, _get_cross_encoder
@@ -130,9 +130,17 @@ async def upload_pdf(
     display_name = _sanitize_name(Path(safe_filename).stem)
     collection_name = _scoped_collection(user["email"], display_name)
 
+    # Persist the PDF for later preview/download
+    pdf_store = Path(PDF_STORE_PATH)
+    pdf_store.mkdir(parents=True, exist_ok=True)
+    stored_pdf_path = pdf_store / f"{collection_name}.pdf"
+
     try:
         logger.info(f"Uploading file: {safe_filename} for user: {user['email']}")
-        tmp_path.write_bytes(await file.read())
+        raw_bytes = await file.read()
+        tmp_path.write_bytes(raw_bytes)
+        # Also save a permanent copy for download
+        stored_pdf_path.write_bytes(raw_bytes)
         result = ingest_pdf(file_path=str(tmp_path), collection_name=collection_name)
         result["collection"] = display_name  # return display name to frontend
         logger.info(f"Successfully processed file: {safe_filename}")
@@ -176,3 +184,20 @@ async def list_collections(user: dict = Depends(get_current_user)) -> Dict[str, 
     prefix = _user_prefix(user["email"]) + "__"
     user_names = [_display_name(user["email"], n) for n in all_names if n.startswith(prefix)]
     return {"collections": user_names}
+
+
+@app.get("/download/{collection}")
+async def download_pdf(
+    collection: str,
+    user: dict = Depends(get_current_user),
+):
+    """Return the original PDF for a given (display) collection name."""
+    scoped = _scoped_collection(user["email"], collection)
+    pdf_path = Path(PDF_STORE_PATH) / f"{scoped}.pdf"
+    if not pdf_path.exists():
+        raise HTTPException(status_code=404, detail="PDF file not found. It may have been uploaded before preview storage was enabled.")
+    return FileResponse(
+        path=str(pdf_path),
+        media_type="application/pdf",
+        filename=f"{collection}.pdf",
+    )

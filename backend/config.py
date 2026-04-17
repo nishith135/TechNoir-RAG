@@ -17,6 +17,9 @@ EMBED_MODEL = os.getenv("EMBED_MODEL", "models/gemini-embedding-001")
 # ── ChromaDB ─────────────────────────────────────────────────────
 CHROMA_PERSIST_PATH = os.getenv("CHROMA_PERSIST_PATH", "./chroma_db")
 
+# ── PDF Storage (kept for download/preview) ───────────────────────
+PDF_STORE_PATH = os.getenv("PDF_STORE_PATH", "./pdf_store")
+
 # ── Chunking ─────────────────────────────────────────────────────
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "800"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "80"))

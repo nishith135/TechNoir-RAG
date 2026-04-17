@@ -174,6 +174,88 @@ const NAV_ITEMS = [
   { icon: "settings", label: "Settings", id: "settings" },
 ];
 
+/* ─── Notification Panel ─── */
+function NotificationPanel({ onClose, collections }) {
+  const notifs = [
+    ...(collections.length > 0
+      ? [{ id: 1, icon: "description", text: `${collections.length} document(s) indexed and ready for queries.`, time: "Now" }]
+      : [{ id: 1, icon: "info", text: "No documents indexed yet. Upload a PDF to get started.", time: "Now" }]),
+    { id: 2, icon: "bolt", text: "Hybrid retrieval (Semantic + BM25 + Rerank) is active.", time: "Session" },
+    { id: 3, icon: "auto_awesome", text: "AI Engine v2.4 — Gemini 1.5 Flash powering inference.", time: "Session" },
+  ];
+  return (
+    <div className="fixed inset-0 z-50" onClick={onClose}>
+      <div
+        className="absolute right-16 top-14 w-80 bg-surface-container border border-outline-variant/20 rounded-xl shadow-2xl animate-fade-in-up overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-outline-variant/10">
+          <span className="text-sm font-bold text-on-surface uppercase tracking-widest">Notifications</span>
+          <button onClick={onClose} className="text-on-surface-variant hover:text-on-surface transition-colors">
+            <span className="material-symbols-outlined text-base">close</span>
+          </button>
+        </div>
+        <div className="divide-y divide-outline-variant/10">
+          {notifs.map((n) => (
+            <div key={n.id} className="flex items-start gap-3 px-5 py-4 hover:bg-surface-container-high transition-colors">
+              <span className="material-symbols-outlined text-primary text-lg mt-0.5">{n.icon}</span>
+              <div className="flex-1">
+                <p className="text-xs text-on-surface leading-relaxed">{n.text}</p>
+                <p className="text-[10px] text-on-surface-variant mt-1 uppercase tracking-widest">{n.time}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Context Switcher Dropdown ─── */
+function ContextSwitcher({ collections, activeCollection, onSelect, onClose }) {
+  return (
+    <div className="fixed inset-0 z-50" onClick={onClose}>
+      <div
+        className="absolute bottom-24 left-6 w-72 bg-surface-container border border-outline-variant/20 rounded-xl shadow-2xl animate-fade-in-up overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/10">
+          <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Switch Document Context</span>
+          <button onClick={onClose} className="text-on-surface-variant hover:text-on-surface transition-colors">
+            <span className="material-symbols-outlined text-sm">close</span>
+          </button>
+        </div>
+        {collections.length === 0 ? (
+          <div className="px-4 py-6 text-xs text-on-surface-variant text-center">
+            No documents indexed yet. Upload a PDF first.
+          </div>
+        ) : (
+          <div className="py-2 max-h-64 overflow-y-auto custom-scrollbar">
+            {collections.map((name) => (
+              <button
+                key={name}
+                onClick={() => { onSelect(name); onClose(); }}
+                className={
+                  "flex w-full items-center gap-3 px-4 py-3 text-left text-sm transition-all " +
+                  (name === activeCollection
+                    ? "text-primary bg-surface-container-high border-l-2 border-secondary"
+                    : "text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface")
+                }
+              >
+                <span className="material-symbols-outlined text-base">description</span>
+                <span className="truncate">{name}</span>
+                {name === activeCollection && (
+                  <span className="material-symbols-outlined text-sm ml-auto text-secondary">check_circle</span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ─── Main App ─── */
 export default function App() {
   const { user, loading: authLoading, logout, authFetch } = useAuth();
@@ -220,6 +302,16 @@ function MainApp({ user, logout, authFetch }) {
   const [openCitationIndex, setOpenCitationIndex] = useState(null);
   const [activeNav, setActiveNav] = useState("chat");
   const [showSettings, setShowSettings] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [showContextSwitcher, setShowContextSwitcher] = useState(false);
+
+  // ── Mic / Speech recognition state ──
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef(null);
+
+  // ── PDF object URL for inline preview ──
+  const [pdfObjectUrl, setPdfObjectUrl] = useState(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   const activeSourcesByMessageId = useMemo(() => {
     const map = new Map();
@@ -253,9 +345,77 @@ function MainApp({ user, logout, authFetch }) {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, chatLoading]);
 
+  // ── Fetch PDF blob and create an object URL for inline preview ──
+  useEffect(() => {
+    if (!activeCollection) {
+      setPdfObjectUrl(null);
+      return;
+    }
+    let cancelled = false;
+    setPdfLoading(true);
+    setPdfObjectUrl(null);
+    authFetch(`/download/${encodeURIComponent(activeCollection)}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error("Failed to download PDF");
+        const blob = await res.blob();
+        if (!cancelled) {
+          const url = URL.createObjectURL(blob);
+          setPdfObjectUrl(url);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setPdfObjectUrl(null);
+      })
+      .finally(() => {
+        if (!cancelled) setPdfLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCollection]);
+
+  // ── Cleanup object URL on unmount ──
+  useEffect(() => {
+    return () => {
+      if (pdfObjectUrl) URL.revokeObjectURL(pdfObjectUrl);
+    };
+  }, [pdfObjectUrl]);
+
   async function handleUploadClick() {
     setUploadError("");
     if (fileInputRef.current) fileInputRef.current.click();
+  }
+
+  function handleMicClick() {
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Speech recognition is not supported in this browser. Try Chrome or Edge.");
+      return;
+    }
+
+    // If already listening → stop
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognitionRef.current = recognition;
+
+    recognition.onstart = () => setIsListening(true);
+    recognition.onend = () => setIsListening(false);
+    recognition.onerror = () => setIsListening(false);
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      setQuestion((prev) => (prev ? prev + " " + transcript : transcript));
+    };
+
+    recognition.start();
   }
 
   async function handleUploadFile(file) {
@@ -416,8 +576,14 @@ function MainApp({ user, logout, authFetch }) {
           </nav>
         </div>
         <div className="flex items-center gap-4">
-          <button className="text-on-surface-variant hover:text-white transition-colors duration-200">
+          <button
+            onClick={() => setShowNotifications((v) => !v)}
+            className="relative text-on-surface-variant hover:text-white transition-colors duration-200"
+            title="Notifications"
+          >
             <span className="material-symbols-outlined">notifications</span>
+            {/* unread dot */}
+            <span className="absolute top-0 right-0 w-2 h-2 rounded-full bg-primary" />
           </button>
           <button
             onClick={() => setShowSettings(true)}
@@ -747,7 +913,7 @@ function MainApp({ user, logout, authFetch }) {
           {activeNav === "chat" && (
             <>
               {/* ── LEFT: Document Viewer ── */}
-              <section className="flex-[1.2] flex flex-col bg-surface-container-low relative border-r border-outline-variant/10">
+              <section className="flex-[1.2] flex flex-col overflow-hidden bg-surface-container-low relative border-r border-outline-variant/10">
                 {/* Document Toolbar */}
                 <div className="h-12 flex items-center justify-between px-6 bg-surface-container border-b border-outline-variant/10">
                   <div className="flex items-center gap-4">
@@ -780,57 +946,40 @@ function MainApp({ user, logout, authFetch }) {
                 </div>
 
                 {/* Document Canvas */}
-                <div className="flex-1 overflow-y-auto custom-scrollbar bg-surface-container-low p-8 md:p-12">
+                <div className="flex-1 overflow-hidden bg-surface-container-low flex flex-col">
                   {activeCollection ? (
-                    <div className="max-w-2xl mx-auto bg-white shadow-2xl min-h-[900px] p-12 md:p-16 text-[#1a1a1a] relative">
-                      <div className="mb-12 border-b-2 border-black pb-4">
-                        <h1 className="text-2xl font-headline font-bold uppercase tracking-tighter">
-                          {activeCollection}
-                        </h1>
-                        <p className="text-xs font-bold mt-2">
-                          INDEXED DOCUMENT | RAG SYSTEM
-                        </p>
-                      </div>
-                      <div className="space-y-6 text-sm leading-relaxed font-body">
-                        <p>
-                          This document has been successfully ingested and
-                          indexed into the vector database.{" "}
-                          <span className="bg-tertiary/40 px-1 border-b-2 border-tertiary">
-                            You can now ask questions about its contents using
-                            the chat interface.
-                          </span>
-                        </p>
-                        <p>
-                          The system uses{" "}
-                          <span className="bg-primary/30 px-1">
-                            hybrid retrieval
-                          </span>{" "}
-                          combining dense vector search with cross-encoder
-                          reranking.
-                        </p>
-                        <div className="py-6 flex items-center justify-center">
-                          <div className="w-full h-48 bg-gradient-to-br from-gray-100 to-gray-200 rounded flex flex-col items-center justify-center gap-3">
-                            <span
-                              className="material-symbols-outlined text-5xl text-gray-400"
-                              style={{
-                                fontVariationSettings: "'FILL' 0, 'wght' 300",
-                              }}
-                            >
-                              description
-                            </span>
-                            <p className="text-xs text-gray-500 font-medium">
-                              Document preview area
-                            </p>
-                          </div>
+                    <div className="flex-1 flex flex-col h-full">
+                      {pdfLoading && (
+                        <div className="flex-1 flex flex-col items-center justify-center gap-4 text-on-surface-variant">
+                          <Spinner size={36} />
+                          <span className="text-xs uppercase tracking-widest">Loading PDF…</span>
                         </div>
-                        <p>
-                          The retrieval pipeline uses{" "}
-                          <span className="bg-tertiary/40 px-1 border-b-2 border-tertiary">
-                            cross-encoder reranking
-                          </span>{" "}
-                          to ensure the most relevant passages are surfaced.
-                        </p>
-                      </div>
+                      )}
+                      {!pdfLoading && pdfObjectUrl && (
+                        <iframe
+                          key={pdfObjectUrl}
+                          src={pdfObjectUrl}
+                          className="flex-1 w-full h-full border-0"
+                          title={`${activeCollection} preview`}
+                        />
+                      )}
+                      {!pdfLoading && !pdfObjectUrl && (
+                        <div className="flex-1 flex flex-col items-center justify-center gap-4 text-on-surface-variant p-8">
+                          <span
+                            className="material-symbols-outlined text-5xl opacity-40"
+                            style={{ fontVariationSettings: "'FILL' 0, 'wght' 200" }}
+                          >
+                            description
+                          </span>
+                          <p className="text-sm text-center">
+                            Could not load PDF preview for{" "}
+                            <span className="font-bold text-on-surface">{activeCollection}</span>.
+                          </p>
+                          <p className="text-xs text-outline text-center">
+                            The document is still indexed — you can query it in the chat.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="flex flex-col items-center justify-center h-full gap-8">
@@ -1105,11 +1254,14 @@ function MainApp({ user, logout, authFetch }) {
                           </span>
                           Model: Gemini 1.5 Flash
                         </button>
-                        <button className="flex items-center gap-1 hover:text-on-surface transition-colors">
-                          <span className="material-symbols-outlined text-sm">
-                            layers
-                          </span>
+                        <button
+                          className="flex items-center gap-1 hover:text-on-surface transition-colors relative"
+                          onClick={() => setShowContextSwitcher((v) => !v)}
+                          title="Switch document context"
+                        >
+                          <span className="material-symbols-outlined text-sm">layers</span>
                           Context: {activeCollection || "none"}
+                          <span className="material-symbols-outlined text-[10px] ml-0.5">expand_more</span>
                         </button>
                       </div>
                       <div className="text-outline">
@@ -1131,7 +1283,7 @@ function MainApp({ user, logout, authFetch }) {
                           className="bg-transparent border-none focus:ring-0 text-sm placeholder:text-outline-variant resize-none w-full min-h-[80px] text-on-surface"
                           placeholder={
                             activeCollection
-                              ? "Ask about the document or research context..."
+                              ? (isListening ? "🎙️ Listening… speak now" : "Ask about the document or research context...")
                               : "Upload a document to start chatting..."
                           }
                           disabled={!activeCollection}
@@ -1143,14 +1295,14 @@ function MainApp({ user, logout, authFetch }) {
                               className="p-2 rounded hover:bg-surface-container-high text-on-surface-variant transition-colors"
                               title="Attach file"
                             >
-                              <span className="material-symbols-outlined">
-                                attach_file
-                              </span>
+                              <span className="material-symbols-outlined">attach_file</span>
                             </button>
-                            <button className="p-2 rounded hover:bg-surface-container-high text-on-surface-variant transition-colors">
-                              <span className="material-symbols-outlined">
-                                mic
-                              </span>
+                            <button
+                              onClick={handleMicClick}
+                              className={"p-2 rounded transition-colors " + (isListening ? "bg-error/20 text-error animate-pulse" : "hover:bg-surface-container-high text-on-surface-variant")}
+                              title={isListening ? "Stop recording" : "Voice input (Speech-to-text)"}
+                            >
+                              <span className="material-symbols-outlined">{isListening ? "mic_off" : "mic"}</span>
                             </button>
                           </div>
                           <button
@@ -1164,9 +1316,7 @@ function MainApp({ user, logout, authFetch }) {
                             className="bg-gradient-to-br from-primary to-primary-dim text-on-primary-container px-6 py-2 rounded-md font-bold text-xs uppercase tracking-widest hover:opacity-90 transition-all flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             Execute Inference
-                            <span className="material-symbols-outlined text-sm">
-                              send
-                            </span>
+                            <span className="material-symbols-outlined text-sm">send</span>
                           </button>
                         </div>
                       </div>
@@ -1185,6 +1335,27 @@ function MainApp({ user, logout, authFetch }) {
           onClose={() => setShowSettings(false)}
           user={user}
           onLogout={logout}
+        />
+      )}
+
+      {/* ═══════ NOTIFICATION PANEL ═══════ */}
+      {showNotifications && (
+        <NotificationPanel
+          onClose={() => setShowNotifications(false)}
+          collections={collections}
+        />
+      )}
+
+      {/* ═══════ CONTEXT SWITCHER ═══════ */}
+      {showContextSwitcher && (
+        <ContextSwitcher
+          collections={collections}
+          activeCollection={activeCollection}
+          onSelect={(name) => {
+            setActiveCollection(name);
+            setOpenCitationIndex(null);
+          }}
+          onClose={() => setShowContextSwitcher(false)}
         />
       )}
 
