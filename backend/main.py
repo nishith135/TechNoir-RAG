@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import logging
@@ -10,7 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, Request
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
@@ -144,7 +145,16 @@ async def upload_pdf(
         result = ingest_pdf(file_path=str(tmp_path), collection_name=collection_name)
         result["collection"] = display_name  # return display name to frontend
         logger.info(f"Successfully processed file: {safe_filename}")
-        return result
+        return {
+            "chunks_indexed": result.get("chunks_indexed", 0),
+            "collection": display_name,
+            "source": result.get("source", safe_filename),
+            "total_pages": result.get("total_pages", 0),
+            "file_size_kb": result.get("file_size_kb", 0),
+            "summary": result.get("summary", ""),
+            "keywords": result.get("keywords", []),
+            "uploaded_at": result.get("uploaded_at", ""),
+        }
     except Exception as e:
         logger.error(f"Error processing file {safe_filename}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -201,3 +211,51 @@ async def download_pdf(
         media_type="application/pdf",
         filename=f"{collection}.pdf",
     )
+
+
+@app.get("/document-meta")
+async def get_document_meta(
+    collection: str = Query(..., description="Display collection name"),
+    user: dict = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Return persisted metadata for a document collection."""
+    scoped = _scoped_collection(user["email"], collection)
+    meta_path = Path(CHROMA_PERSIST_PATH) / f"{scoped}_meta.json"
+    if not meta_path.exists():
+        raise HTTPException(status_code=404, detail="Metadata not found")
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        # Always return the display name to the frontend
+        meta["collection"] = collection
+        return meta
+    except Exception as e:
+        logger.error(f"Failed to read metadata for {collection}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to read metadata")
+
+
+@app.get("/chunks")
+async def get_chunks(
+    collection: str = Query(..., description="Display collection name"),
+    limit: int = Query(20, ge=1, le=100),
+    user: dict = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Return raw indexed chunks for a collection (for the Chunk Explorer UI)."""
+    scoped = _scoped_collection(user["email"], collection)
+    try:
+        client = chromadb.PersistentClient(path=CHROMA_PERSIST_PATH)
+        col = client.get_collection(name=scoped)
+        result = col.get(limit=limit, include=["documents", "metadatas"])
+        chunks = []
+        for i, doc in enumerate(result.get("documents") or []):
+            meta = (result.get("metadatas") or [])[i] if result.get("metadatas") else {}
+            chunks.append({
+                "id": (result.get("ids") or [])[i] if result.get("ids") else str(i),
+                "text": doc,
+                "page": meta.get("page", -1),
+                "source": meta.get("source", ""),
+            })
+        return {"chunks": chunks}
+    except Exception as e:
+        logger.error(f"Failed to fetch chunks for {collection}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch chunks: {e}")

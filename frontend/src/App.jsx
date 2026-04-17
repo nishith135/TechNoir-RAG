@@ -283,6 +283,162 @@ export default function App() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   Document Intelligence Panel Component
+   ═══════════════════════════════════════════════════════════════ */
+function DocumentIntelligencePanel({ meta, chunks, metaLoading, chunksLoading, activeCollection, onUploadClick }) {
+  // Format ISO timestamp to human readable
+  function fmtDate(iso) {
+    if (!iso) return "";
+    try {
+      return new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+    } catch { return iso; }
+  }
+
+  // Empty state
+  if (!activeCollection) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
+        <div className="w-20 h-20 rounded-2xl bg-gray-800 flex items-center justify-center">
+          <span className="material-symbols-outlined text-4xl text-gray-500" style={{ fontVariationSettings: "'FILL' 0, 'wght' 200" }}>
+            description
+          </span>
+        </div>
+        <p className="text-gray-500 text-sm text-center">Select a document to view intelligence panel</p>
+        <button
+          onClick={onUploadClick}
+          className="mt-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-widest rounded-lg transition-colors"
+        >
+          Upload Document
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto" style={{ background: "rgb(17 24 39)", padding: "1.5rem" }}>
+      <div className="rounded-xl overflow-hidden" style={{ background: "rgb(17 24 39)" }}>
+
+        {/* ── SECTION 1: Document Header ── */}
+        <div className="mb-6">
+          {metaLoading ? (
+            <div className="animate-pulse space-y-3">
+              <div className="h-5 bg-gray-700 rounded w-3/4" />
+              <div className="flex gap-2">
+                <div className="h-8 bg-gray-700 rounded-lg w-24" />
+                <div className="h-8 bg-gray-700 rounded-lg w-24" />
+                <div className="h-8 bg-gray-700 rounded-lg w-24" />
+              </div>
+              <div className="h-3 bg-gray-700 rounded w-1/3" />
+            </div>
+          ) : (
+            <>
+              <h2 className="text-white font-semibold text-lg mb-3 truncate">
+                {meta?.filename || `${activeCollection}.pdf`}
+              </h2>
+              <div className="flex flex-wrap gap-2 mb-2">
+                <div className="flex items-center gap-1.5 bg-gray-800 rounded-lg px-3 py-2 text-sm text-gray-200">
+                  <span className="text-base">📄</span>
+                  <span>{meta?.total_pages ?? "—"} Pages</span>
+                </div>
+                <div className="flex items-center gap-1.5 bg-gray-800 rounded-lg px-3 py-2 text-sm text-gray-200">
+                  <span className="text-base">🧩</span>
+                  <span>{meta?.total_chunks ?? "—"} Chunks</span>
+                </div>
+                <div className="flex items-center gap-1.5 bg-gray-800 rounded-lg px-3 py-2 text-sm text-gray-200">
+                  <span className="text-base">💾</span>
+                  <span>{meta?.file_size_kb ?? "—"} KB</span>
+                </div>
+              </div>
+              {meta?.uploaded_at && (
+                <p className="text-gray-500 text-xs">Uploaded {fmtDate(meta.uploaded_at)}</p>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* ── SECTION 2: AI Summary ── */}
+        <div className="mb-6 bg-gray-800 rounded-xl p-4">
+          <p className="text-indigo-400 text-xs tracking-widest uppercase font-bold mb-3">AI Summary</p>
+          {metaLoading ? (
+            <div className="animate-pulse space-y-2">
+              <div className="bg-gray-700 rounded h-4 w-full" />
+              <div className="bg-gray-700 rounded h-4 w-5/6" />
+              <div className="bg-gray-700 rounded h-4 w-4/6" />
+              <div className="bg-gray-700 rounded h-4 w-3/4" />
+            </div>
+          ) : meta?.summary ? (
+            <p className="text-gray-300 text-sm leading-relaxed">{meta.summary}</p>
+          ) : (
+            <p className="text-gray-500 text-sm italic">No summary available. Re-upload the document to generate one.</p>
+          )}
+        </div>
+
+        {/* ── SECTION 3: Topics & Keywords ── */}
+        {(meta?.keywords?.length > 0 || metaLoading) && (
+          <div className="mb-6">
+            <p className="text-indigo-400 text-xs tracking-widest uppercase font-bold mb-3">Topics</p>
+            {metaLoading ? (
+              <div className="flex flex-wrap gap-2 animate-pulse">
+                {[...Array(8)].map((_, i) => (
+                  <div key={i} className="h-6 bg-gray-700 rounded-full" style={{ width: `${60 + (i % 3) * 20}px` }} />
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {(meta?.keywords || []).map((kw, i) => (
+                  <span
+                    key={i}
+                    className="px-3 py-1 text-xs rounded-full border"
+                    style={{ background: "rgb(30 27 75)", borderColor: "rgb(55 48 163)", color: "rgb(165 180 252)" }}
+                  >
+                    {kw}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── SECTION 4: Chunk Explorer ── */}
+        <div>
+          <p className="text-indigo-400 text-xs tracking-widest uppercase font-bold mb-3">Indexed Chunks</p>
+          {chunksLoading ? (
+            <div className="animate-pulse space-y-2">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="bg-gray-800 rounded-lg p-3">
+                  <div className="h-3 bg-gray-700 rounded w-1/4 mb-2" />
+                  <div className="h-3 bg-gray-700 rounded w-full mb-1" />
+                  <div className="h-3 bg-gray-700 rounded w-4/5" />
+                </div>
+              ))}
+            </div>
+          ) : chunks.length === 0 ? (
+            <p className="text-gray-500 text-xs">No chunks available.</p>
+          ) : (
+            <div className="space-y-2 max-h-64 overflow-y-auto pr-1 custom-scrollbar">
+              {chunks.map((chunk, i) => (
+                <div key={chunk.id || i} className="bg-gray-800 rounded-lg p-3">
+                  <span
+                    className="inline-block text-white text-xs font-bold rounded px-2 py-0.5 mb-2"
+                    style={{ background: "rgb(79 70 229)" }}
+                  >
+                    Page {chunk.page}
+                  </span>
+                  <p className="text-gray-400 text-xs leading-relaxed">
+                    {chunk.text.length > 200 ? chunk.text.slice(0, 200) + "…" : chunk.text}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
    Main authenticated application
    ═══════════════════════════════════════════════════════════════ */
 function MainApp({ user, logout, authFetch }) {
@@ -312,6 +468,12 @@ function MainApp({ user, logout, authFetch }) {
   // ── PDF object URL for inline preview ──
   const [pdfObjectUrl, setPdfObjectUrl] = useState(null);
   const [pdfLoading, setPdfLoading] = useState(false);
+
+  // ── Document Intelligence Panel state ──
+  const [documentMeta, setDocumentMeta] = useState(null);
+  const [chunkPreviews, setChunkPreviews] = useState([]);
+  const [metaLoading, setMetaLoading] = useState(false);
+  const [chunksLoading, setChunksLoading] = useState(false);
 
   const activeSourcesByMessageId = useMemo(() => {
     const map = new Map();
@@ -381,6 +543,40 @@ function MainApp({ user, logout, authFetch }) {
     };
   }, [pdfObjectUrl]);
 
+  // ── Fetch document metadata when activeCollection changes ──
+  useEffect(() => {
+    if (!activeCollection) {
+      setDocumentMeta(null);
+      setChunkPreviews([]);
+      return;
+    }
+    let cancelled = false;
+
+    // Fetch metadata
+    setMetaLoading(true);
+    authFetch(`/document-meta?collection=${encodeURIComponent(activeCollection)}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error("Metadata not found");
+        const data = await res.json();
+        if (!cancelled) setDocumentMeta(data);
+      })
+      .catch(() => { if (!cancelled) setDocumentMeta(null); })
+      .finally(() => { if (!cancelled) setMetaLoading(false); });
+
+    // Fetch chunks
+    setChunksLoading(true);
+    authFetch(`/chunks?collection=${encodeURIComponent(activeCollection)}&limit=20`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error("Failed to fetch chunks");
+        const data = await res.json();
+        if (!cancelled) setChunkPreviews(data.chunks || []);
+      })
+      .catch(() => { if (!cancelled) setChunkPreviews([]); })
+      .finally(() => { if (!cancelled) setChunksLoading(false); });
+
+    return () => { cancelled = true; };
+  }, [activeCollection]);
+
   async function handleUploadClick() {
     setUploadError("");
     if (fileInputRef.current) fileInputRef.current.click();
@@ -439,6 +635,19 @@ function MainApp({ user, logout, authFetch }) {
       }
 
       const summary = await res.json();
+
+      // Populate Document Intelligence Panel directly from upload response
+      if (summary) {
+        setDocumentMeta({
+          filename: summary.source || "",
+          total_pages: summary.total_pages || 0,
+          total_chunks: summary.chunks_indexed || 0,
+          file_size_kb: summary.file_size_kb || 0,
+          uploaded_at: summary.uploaded_at || "",
+          summary: summary.summary || "",
+          keywords: summary.keywords || [],
+        });
+      }
 
       const cols = await fetchCollections();
       setCollections(cols);
@@ -912,7 +1121,7 @@ function MainApp({ user, logout, authFetch }) {
           {/* ─────── CHAT VIEW (split layout) ─────── */}
           {activeNav === "chat" && (
             <>
-              {/* ── LEFT: Document Viewer ── */}
+              {/* ── LEFT: Document Intelligence Panel ── */}
               <section className="flex-[1.2] flex flex-col overflow-hidden bg-surface-container-low relative border-r border-outline-variant/10">
                 {/* Document Toolbar */}
                 <div className="h-12 flex items-center justify-between px-6 bg-surface-container border-b border-outline-variant/10">
@@ -926,187 +1135,42 @@ function MainApp({ user, logout, authFetch }) {
                         : "No document selected"}
                     </span>
                   </div>
-                  {activeCollection && (
-                    <div className="flex items-center gap-2">
-                      <button className="p-1.5 rounded hover:bg-surface-variant text-on-surface-variant">
-                        <span className="material-symbols-outlined text-sm">
-                          zoom_out
-                        </span>
-                      </button>
-                      <span className="text-xs font-mono text-on-surface-variant">
-                        85%
-                      </span>
-                      <button className="p-1.5 rounded hover:bg-surface-variant text-on-surface-variant">
-                        <span className="material-symbols-outlined text-sm">
-                          zoom_in
-                        </span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Document Canvas */}
-                <div className="flex-1 overflow-hidden bg-surface-container-low flex flex-col">
-                  {activeCollection ? (
-                    <div className="flex-1 flex flex-col h-full">
-                      {pdfLoading && (
-                        <div className="flex-1 flex flex-col items-center justify-center gap-4 text-on-surface-variant">
-                          <Spinner size={36} />
-                          <span className="text-xs uppercase tracking-widest">Loading PDF…</span>
-                        </div>
-                      )}
-                      {!pdfLoading && pdfObjectUrl && (
-                        <iframe
-                          key={pdfObjectUrl}
-                          src={pdfObjectUrl}
-                          className="flex-1 w-full h-full border-0"
-                          title={`${activeCollection} preview`}
-                        />
-                      )}
-                      {!pdfLoading && !pdfObjectUrl && (
-                        <div className="flex-1 flex flex-col items-center justify-center gap-4 text-on-surface-variant p-8">
-                          <span
-                            className="material-symbols-outlined text-5xl opacity-40"
-                            style={{ fontVariationSettings: "'FILL' 0, 'wght' 200" }}
-                          >
-                            description
-                          </span>
-                          <p className="text-sm text-center">
-                            Could not load PDF preview for{" "}
-                            <span className="font-bold text-on-surface">{activeCollection}</span>.
-                          </p>
-                          <p className="text-xs text-outline text-center">
-                            The document is still indexed — you can query it in the chat.
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center h-full gap-8">
-                      <div
-                        onClick={handleUploadClick}
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          setDragOver(true);
+                  {activeCollection && collections.length > 1 && (
+                    <div className="flex items-center gap-1 text-on-surface-variant text-xs font-mono">
+                      <button
+                        className="p-1 rounded hover:bg-surface-variant transition-colors"
+                        onClick={() => {
+                          const idx = collections.indexOf(activeCollection);
+                          if (idx > 0) { setActiveCollection(collections[idx - 1]); setOpenCitationIndex(null); }
                         }}
-                        onDragLeave={() => setDragOver(false)}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          setDragOver(false);
-                          const file = e.dataTransfer.files?.[0];
-                          if (file) handleUploadFile(file);
-                        }}
-                        className={
-                          "flex cursor-pointer flex-col items-center gap-6 rounded-xl border-2 border-dashed p-16 transition-all max-w-lg w-full " +
-                          (dragOver
-                            ? "border-primary bg-primary/5 scale-[1.02]"
-                            : "border-outline-variant/40 hover:border-primary/40 hover:bg-surface-container")
-                        }
                       >
-                        {uploading ? (
-                          <Spinner size={40} />
-                        ) : (
-                          <div className="w-20 h-20 rounded-2xl bg-surface-container-high flex items-center justify-center">
-                            <span
-                              className="material-symbols-outlined text-4xl text-primary"
-                              style={{
-                                fontVariationSettings: "'FILL' 0, 'wght' 300",
-                              }}
-                            >
-                              cloud_upload
-                            </span>
-                          </div>
-                        )}
-                        <div className="text-center">
-                          <div className="text-lg font-headline font-semibold text-on-surface">
-                            Upload Document
-                          </div>
-                          <div className="mt-2 text-sm text-on-surface-variant">
-                            Drag & drop a PDF or click to browse
-                          </div>
-                        </div>
-                      </div>
-                      {uploadError && (
-                        <div className="text-sm text-error bg-error-container/20 px-4 py-2 rounded-lg">
-                          {uploadError}
-                        </div>
-                      )}
-                      {collections.length > 0 && (
-                        <div className="max-w-lg w-full">
-                          <div className="flex items-center gap-2 mb-3">
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-                              Indexed Documents
-                            </span>
-                            <span className="bg-secondary-container px-2 py-0.5 rounded text-[10px] font-bold text-on-secondary-container">
-                              {collections.length}
-                            </span>
-                          </div>
-                          <div className="space-y-1">
-                            {collections.map((name) => (
-                              <button
-                                key={name}
-                                type="button"
-                                onClick={() => {
-                                  setActiveCollection(name);
-                                  setOpenCitationIndex(null);
-                                }}
-                                className={
-                                  "flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left text-sm transition-all " +
-                                  (name === activeCollection
-                                    ? "border-l-2 border-secondary bg-surface-container-high text-on-surface"
-                                    : "text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface")
-                                }
-                              >
-                                <span className="material-symbols-outlined text-base">
-                                  description
-                                </span>
-                                <span className="truncate">{name}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                        <span className="material-symbols-outlined text-sm">chevron_left</span>
+                      </button>
+                      <span>{collections.indexOf(activeCollection) + 1}/{collections.length}</span>
+                      <button
+                        className="p-1 rounded hover:bg-surface-variant transition-colors"
+                        onClick={() => {
+                          const idx = collections.indexOf(activeCollection);
+                          if (idx < collections.length - 1) { setActiveCollection(collections[idx + 1]); setOpenCitationIndex(null); }
+                        }}
+                      >
+                        <span className="material-symbols-outlined text-sm">chevron_right</span>
+                      </button>
                     </div>
                   )}
                 </div>
 
-                {/* Floating Document Controls */}
-                {activeCollection && collections.length > 0 && (
-                  <div className="absolute left-1/2 -translate-x-1/2 bottom-6 glass-panel p-2 flex items-center gap-2 border border-outline-variant/20 rounded-xl">
-                    <button
-                      className="w-10 h-10 flex items-center justify-center text-on-surface-variant hover:text-primary transition-colors"
-                      onClick={() => {
-                        const idx = collections.indexOf(activeCollection);
-                        if (idx > 0) {
-                          setActiveCollection(collections[idx - 1]);
-                          setOpenCitationIndex(null);
-                        }
-                      }}
-                    >
-                      <span className="material-symbols-outlined">
-                        first_page
-                      </span>
-                    </button>
-                    <span className="text-xs font-bold px-4 border-x border-outline-variant/20 whitespace-nowrap">
-                      DOC {collections.indexOf(activeCollection) + 1} OF{" "}
-                      {collections.length}
-                    </span>
-                    <button
-                      className="w-10 h-10 flex items-center justify-center text-on-surface-variant hover:text-primary transition-colors"
-                      onClick={() => {
-                        const idx = collections.indexOf(activeCollection);
-                        if (idx < collections.length - 1) {
-                          setActiveCollection(collections[idx + 1]);
-                          setOpenCitationIndex(null);
-                        }
-                      }}
-                    >
-                      <span className="material-symbols-outlined">
-                        last_page
-                      </span>
-                    </button>
-                  </div>
-                )}
+                {/* Document Intelligence Panel */}
+                <div className="flex-1 overflow-hidden bg-surface-container-low flex flex-col">
+                  <DocumentIntelligencePanel
+                    meta={documentMeta}
+                    chunks={chunkPreviews}
+                    metaLoading={metaLoading}
+                    chunksLoading={chunksLoading}
+                    activeCollection={activeCollection}
+                    onUploadClick={handleUploadClick}
+                  />
+                </div>
               </section>
 
               {/* ── RIGHT: Chat Interface ── */}
