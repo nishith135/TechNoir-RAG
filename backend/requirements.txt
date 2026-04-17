@@ -10,3 +10,5 @@ sentence-transformers
 google-generativeai
 bcrypt
 python-jose[cryptography]
+pytest
+httpx
