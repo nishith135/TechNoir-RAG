@@ -110,8 +110,12 @@ def hybrid_retrieve(query: str, collection_name: str, k: int = 10) -> list[dict]
     top_indices = sorted(range(n), key=lambda i: rrf_scores[i], reverse=True)[:max(k * 2, 10)]
     rrf_top_chunks = [candidates[i] for i in top_indices]
 
-    # Re-score the top chunks using the cross-encoder and return the final top-k
-    return rerank(query, rrf_top_chunks, top_n=k)
+    # Re-score with the cross-encoder; fall back to RRF order on any failure
+    try:
+        return rerank(query, rrf_top_chunks, top_n=k)
+    except Exception:
+        # rerank() is already fault-tolerant, but guard the call site too
+        return rrf_top_chunks[:k]
 
 
 # ---------------------------------------------------------------------------
@@ -122,27 +126,48 @@ _cross_encoder = None
 
 
 def _get_cross_encoder():
-    """Lazy-load the cross-encoder so startup stays fast."""
+    """Lazy-load the cross-encoder so startup stays fast.
+
+    Raises RuntimeError (not ImportError) so callers can catch a single type.
+    """
     global _cross_encoder
     if _cross_encoder is None:
-        from sentence_transformers import CrossEncoder
-        _cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+        try:
+            from sentence_transformers import CrossEncoder
+            _cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+        except Exception as exc:
+            raise RuntimeError(f"Cross-encoder unavailable: {exc}") from exc
     return _cross_encoder
 
 
 def rerank(query: str, chunks: list[dict], top_n: int = 5) -> list[dict]:
-    """Re-score chunks with a cross-encoder and return top_n."""
+    """Re-score chunks with a cross-encoder and return top_n.
+
+    If the cross-encoder cannot be loaded (missing package, download timeout,
+    OOM, etc.) this function logs a warning and returns the first *top_n*
+    chunks from the input list unchanged — preserving the RRF ordering from
+    hybrid_retrieve().
+    """
     if not chunks:
         return []
 
-    model = _get_cross_encoder()
-    pairs = [(query, c.get("text", "")) for c in chunks]
-    scores = model.predict(pairs).tolist()
+    try:
+        model = _get_cross_encoder()
+        pairs = [(query, c.get("text", "")) for c in chunks]
+        scores = model.predict(pairs).tolist()
 
-    scored = []
-    for chunk, score in zip(chunks, scores):
-        entry = {**chunk, "rerank_score": float(score)}
-        scored.append(entry)
+        scored = []
+        for chunk, score in zip(chunks, scores):
+            entry = {**chunk, "rerank_score": float(score)}
+            scored.append(entry)
 
-    scored.sort(key=lambda x: x["rerank_score"], reverse=True)
-    return scored[:top_n]
+        scored.sort(key=lambda x: x["rerank_score"], reverse=True)
+        return scored[:top_n]
+
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Cross-encoder reranking failed — falling back to RRF order. "
+            "Reason: %s", exc
+        )
+        return chunks[:top_n]
