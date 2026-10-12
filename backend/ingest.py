@@ -1,76 +1,65 @@
 import json
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, List
 
-import chromadb
-import pdfplumber
+try:
+    import chromadb
+except ImportError:
+    chromadb = None
+
+try:
+    import pdfplumber
+except ImportError:
+    pdfplumber = None
 
 from backend.config import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
     CHROMA_PERSIST_PATH,
-    EMBED_MODEL,
-    GEMINI_API_KEY,
-    GEMINI_MODEL,
+    MAX_INGEST_PAGES,
 )
+from backend.providers import embed_document_texts, generate_completion
 
-
-import google.generativeai as genai
-
-# Configure GenAI globally (can also be done in main.py)
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
 
 def _embed_texts(texts: List[str]) -> List[List[float]]:
-    """Embed a list of texts using Google Gemini."""
-    if not texts:
-        return []
-    embeddings = []
-    batch_size = 100
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i:i + batch_size]
-        result = genai.embed_content(
-            model=EMBED_MODEL,
-            content=batch,
-            task_type="retrieval_document"
-        )
-        embeddings.extend(result['embedding'])
-    return embeddings
+    """Embed a list of texts using the configured EMBEDDING_PROVIDER."""
+    return embed_document_texts(texts)
 
 
 def _generate_summary(chunks: List[str]) -> str:
-    """Generate a 3-4 sentence summary from the first 3 chunks using Gemini."""
+    """Generate a 3-4 sentence summary from the first 3 chunks using the configured LLM."""
     try:
         context = "\n\n".join(chunks[:3])
-        model = genai.GenerativeModel(GEMINI_MODEL)
-        response = model.generate_content(
-            f"Summarize this document in 3-4 sentences.\n\n{context}"
-        )
-        return response.text.strip() if response and response.text else ""
+        prompt = f"Summarize this document in 3-4 sentences.\n\n{context}"
+        return generate_completion(prompt)
     except Exception:
         return ""
 
 
 def _extract_keywords(chunks: List[str]) -> List[str]:
-    """Extract top 8 keyword tags from the first 5 chunks using Gemini."""
+    """Extract top 8 keyword tags from the first 5 chunks using the configured LLM."""
     try:
         context = "\n\n".join(chunks[:5])
-        model = genai.GenerativeModel(GEMINI_MODEL)
-        response = model.generate_content(
+        prompt = (
             'Return exactly 8 short keyword tags (1-3 words each) that describe the main topics '
             'of this document. Return as a JSON array of strings only, no explanation.'
             f"\n\n{context}"
         )
-        if not response or not response.text:
+        raw = generate_completion(prompt).strip()
+        if not raw:
             return []
-        raw = response.text.strip()
-        # Strip markdown fences if present
-        if raw.startswith("```"):
+        if "```" in raw:
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
-        return json.loads(raw.strip())
+        start_bracket = raw.find("[")
+        end_bracket = raw.rfind("]")
+        if start_bracket != -1 and end_bracket != -1:
+            raw = raw[start_bracket : end_bracket + 1]
+        parsed = json.loads(raw.strip())
+        return parsed if isinstance(parsed, list) else []
     except Exception:
         return []
 
@@ -176,6 +165,10 @@ def ingest_pdf(file_path: str, collection_name: str) -> Dict[str, object]:
 
     with pdfplumber.open(file_path) as pdf:
         total_pages = len(pdf.pages)
+        if total_pages > MAX_INGEST_PAGES:
+            raise ValueError(
+                f"PDF exceeds maximum page limit of {MAX_INGEST_PAGES} pages (found {total_pages})."
+            )
         global_chunk_idx = 0
 
         for page_num, page in enumerate(pdf.pages, start=1):
@@ -243,9 +236,8 @@ def ingest_pdf(file_path: str, collection_name: str) -> Dict[str, object]:
         "keywords": keywords,
     }
 
-    meta_dir = os.path.dirname(os.path.abspath(CHROMA_PERSIST_PATH))
-    meta_path = os.path.join(meta_dir, "chroma_db", f"{collection_name}_meta.json")
-    os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+    meta_path = Path(CHROMA_PERSIST_PATH).resolve() / f"{collection_name}_meta.json"
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
 

@@ -11,6 +11,7 @@ venv/
 
 # Data
 chroma_db/
+pdf_store/
 users.db
 *.db
 

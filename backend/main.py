@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import re
@@ -5,8 +6,15 @@ import logging
 import tempfile
 import uuid
 
-import chromadb
-import google.generativeai as genai
+try:
+    import chromadb
+except ImportError:
+    chromadb = None
+
+try:
+    import google.generativeai as genai
+except ImportError:
+    genai = None
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List
@@ -16,9 +24,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 
-from backend.config import CHROMA_PERSIST_PATH, GEMINI_API_KEY, GEMINI_MODEL, PDF_STORE_PATH
+from backend.config import (
+    CHROMA_PERSIST_PATH,
+    CORS_ORIGINS,
+    EMBEDDING_PROVIDER,
+    GEMINI_API_KEY,
+    GEMINI_MODEL,
+    LLM_PROVIDER,
+    LOCAL_MODE,
+    MAX_UPLOAD_BYTES,
+    OLLAMA_BASE_URL,
+    OLLAMA_MODEL,
+    PDF_STORE_PATH,
+)
 from backend.ingest import ingest_pdf
 from backend.prompts import SYSTEM_PROMPT, build_user_prompt
+from backend.providers import generate_completion
 from backend.retrieval import hybrid_retrieve, _get_cross_encoder
 from backend.auth import router as auth_router, get_current_user
 
@@ -43,20 +64,25 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Error on {request.method} {request.url}: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={"detail": f"Internal Server Error: {exc}"},
+        content={"detail": "Internal Server Error"},
     )
 
-# ─── CORS ──────────────────────────────────────────────────────
-
-# Allow all origins for testing. 
-# IN PRODUCTION: Change ["*"] to your specific frontend URL (e.g., ["https://yourdomain.com"])
+# ─── Security Headers & CORS ───────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
-    allow_credentials=False, # Must be False when origins is ["*"]
-    allow_methods=["*"],
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
 
 # ─── Schemas ───────────────────────────────────────────────────
 class QueryRequest(BaseModel):
@@ -81,26 +107,51 @@ def _sanitize_name(name: str, max_len: int = 40) -> str:
     return name[:max_len] or "doc"
 
 def _user_prefix(email: str) -> str:
-    """Derive a short, ChromaDB-safe prefix from a user's email."""
-    return _sanitize_name(email, max_len=24) or "user"
+    """Derive a short, collision-free prefix from a user's email."""
+    norm = (email or "").strip().lower()
+    digest = hashlib.sha256(norm.encode("utf-8")).hexdigest()[:12]
+    return f"u_{digest}"
 
 def _scoped_collection(email: str, display_name: str) -> str:
     """Internal ChromaDB name: {user_prefix}__{display_name} (max 63 chars)."""
-    return f"{_user_prefix(email)}__{display_name}"[:63]
+    clean_display = _sanitize_name(display_name, max_len=45)
+    return f"{_user_prefix(email)}__{clean_display}"[:63]
 
 def _display_name(email: str, scoped: str) -> str:
     """Strip the user prefix from a scoped collection name."""
     prefix = _user_prefix(email) + "__"
     return scoped[len(prefix):] if scoped.startswith(prefix) else scoped
 
+def _safe_resolve_path(base_dir: Path, filename: str) -> Path:
+    """Ensure resolved file path stays strictly within the target base directory."""
+    clean_name = os.path.basename(filename)
+    base = base_dir.resolve()
+    target = (base / clean_name).resolve()
+    if not target.is_relative_to(base):
+        raise HTTPException(status_code=400, detail="Invalid path parameter.")
+    return target
+
+async def _read_upload_file(file: UploadFile, max_bytes: int = MAX_UPLOAD_BYTES) -> bytes:
+    """Read uploaded file in chunks with strict upper byte size boundary."""
+    chunks = []
+    total = 0
+    chunk_size = 1024 * 1024  # 1 MB
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File exceeds maximum allowed size ({max_bytes // (1024 * 1024)}MB).",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
 def _generate_llm_response(prompt: str) -> str:
-    """Generate a response from Gemini."""
-    try:
-        model = genai.GenerativeModel(GEMINI_MODEL)
-        response = model.generate_content(prompt)
-        return response.text.strip() if response.text else "LLM returned an empty response."
-    except Exception as e:
-        return f"LLM error: {e}"
+    """Generate a response using the decoupled LLM provider (Ollama or Gemini)."""
+    return generate_completion(prompt)
 
 # ─── Endpoints ────────────────────────────────────────────────
 @app.get("/")
@@ -109,7 +160,15 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "gemini_configured": bool(GEMINI_API_KEY)}
+    return {
+        "status": "ok",
+        "llm_provider": LLM_PROVIDER,
+        "embedding_provider": EMBEDDING_PROVIDER,
+        "ollama_base_url": OLLAMA_BASE_URL,
+        "ollama_model": OLLAMA_MODEL,
+        "gemini_configured": bool(GEMINI_API_KEY),
+        "local_mode": LOCAL_MODE,
+    }
 
 @app.get("/version")
 async def version():
@@ -134,16 +193,21 @@ async def upload_pdf(
     # Persist the PDF for later preview/download
     pdf_store = Path(PDF_STORE_PATH)
     pdf_store.mkdir(parents=True, exist_ok=True)
-    stored_pdf_path = pdf_store / f"{collection_name}.pdf"
+    stored_pdf_path = _safe_resolve_path(pdf_store, f"{collection_name}.pdf")
 
     try:
         logger.info(f"Uploading file: {safe_filename} for user: {user['email']}")
-        raw_bytes = await file.read()
+        raw_bytes = await _read_upload_file(file)
+
+        # Verify PDF magic byte signature (%PDF-)
+        if not raw_bytes.startswith(b"%PDF-"):
+            raise HTTPException(status_code=400, detail="Uploaded file is not a valid PDF document.")
+
         tmp_path.write_bytes(raw_bytes)
-        # Also save a permanent copy for download
         stored_pdf_path.write_bytes(raw_bytes)
+
         result = ingest_pdf(file_path=str(tmp_path), collection_name=collection_name)
-        result["collection"] = display_name  # return display name to frontend
+        result["collection"] = display_name
         logger.info(f"Successfully processed file: {safe_filename}")
         return {
             "chunks_indexed": result.get("chunks_indexed", 0),
@@ -155,9 +219,13 @@ async def upload_pdf(
             "keywords": result.get("keywords", []),
             "uploaded_at": result.get("uploaded_at", ""),
         }
+    except HTTPException:
+        stored_pdf_path.unlink(missing_ok=True)
+        raise
     except Exception as e:
+        stored_pdf_path.unlink(missing_ok=True)
         logger.error(f"Error processing file {safe_filename}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to process and ingest PDF document.")
     finally:
         tmp_path.unlink(missing_ok=True)
 
@@ -166,16 +234,26 @@ async def query(
     req: QueryRequest,
     user: dict = Depends(get_current_user),
 ) -> Dict[str, Any]:
+    question_clean = (req.question or "").strip()
+    if not question_clean:
+        raise HTTPException(status_code=400, detail="Question cannot be empty.")
+    if len(question_clean) > 2000:
+        raise HTTPException(status_code=400, detail="Question exceeds 2000 character limit.")
+
+    req_k = max(1, min(req.k, 20))
+
     try:
         logger.info(f"Querying collection '{req.collection}' for user: {user['email']}")
         scoped = _scoped_collection(user["email"], req.collection)
-        chunks = hybrid_retrieve(query=req.question, collection_name=scoped, k=req.k)
-        full_prompt = f"{SYSTEM_PROMPT}\n\n{build_user_prompt(question=req.question, chunks=chunks)}"
+        chunks = hybrid_retrieve(query=question_clean, collection_name=scoped, k=req_k)
+        full_prompt = f"{SYSTEM_PROMPT}\n\n{build_user_prompt(question=question_clean, chunks=chunks)}"
         answer = _generate_llm_response(full_prompt)
         logger.info("Successfully generated query answer.")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error querying collection {req.collection}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Query Error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to execute query.")
 
     sources: List[Dict[str, Any]] = [
         {
@@ -189,12 +267,13 @@ async def query(
 
 @app.get("/collections")
 async def list_collections(user: dict = Depends(get_current_user)) -> Dict[str, Any]:
+    if chromadb is None:
+        return {"collections": []}
     client = chromadb.PersistentClient(path=CHROMA_PERSIST_PATH)
     all_names = [c.name for c in client.list_collections()]
     prefix = _user_prefix(user["email"]) + "__"
     user_names = [_display_name(user["email"], n) for n in all_names if n.startswith(prefix)]
     return {"collections": user_names}
-
 
 @app.get("/download/{collection}")
 async def download_pdf(
@@ -203,15 +282,15 @@ async def download_pdf(
 ):
     """Return the original PDF for a given (display) collection name."""
     scoped = _scoped_collection(user["email"], collection)
-    pdf_path = Path(PDF_STORE_PATH) / f"{scoped}.pdf"
+    pdf_store = Path(PDF_STORE_PATH)
+    pdf_path = _safe_resolve_path(pdf_store, f"{scoped}.pdf")
     if not pdf_path.exists():
-        raise HTTPException(status_code=404, detail="PDF file not found. It may have been uploaded before preview storage was enabled.")
+        raise HTTPException(status_code=404, detail="PDF file not found.")
     return FileResponse(
         path=str(pdf_path),
         media_type="application/pdf",
-        filename=f"{collection}.pdf",
+        filename=f"{_sanitize_name(collection)}.pdf",
     )
-
 
 @app.get("/document-meta")
 async def get_document_meta(
@@ -220,19 +299,19 @@ async def get_document_meta(
 ) -> Dict[str, Any]:
     """Return persisted metadata for a document collection."""
     scoped = _scoped_collection(user["email"], collection)
-    meta_path = Path(CHROMA_PERSIST_PATH) / f"{scoped}_meta.json"
+    meta_path = _safe_resolve_path(Path(CHROMA_PERSIST_PATH), f"{scoped}_meta.json")
     if not meta_path.exists():
         raise HTTPException(status_code=404, detail="Metadata not found")
     try:
         with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
-        # Always return the display name to the frontend
         meta["collection"] = collection
         return meta
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to read metadata for {collection}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to read metadata")
-
 
 @app.get("/chunks")
 async def get_chunks(
@@ -242,6 +321,8 @@ async def get_chunks(
 ) -> Dict[str, Any]:
     """Return raw indexed chunks for a collection (for the Chunk Explorer UI)."""
     scoped = _scoped_collection(user["email"], collection)
+    if chromadb is None:
+        return {"chunks": []}
     try:
         client = chromadb.PersistentClient(path=CHROMA_PERSIST_PATH)
         col = client.get_collection(name=scoped)
@@ -256,6 +337,8 @@ async def get_chunks(
                 "source": meta.get("source", ""),
             })
         return {"chunks": chunks}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to fetch chunks for {collection}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to fetch chunks: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch chunks")

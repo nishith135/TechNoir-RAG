@@ -1,131 +1,147 @@
-# 🧠 Tech Noir RAG: Premium AI Document Analysis Framework
+# 🧠 TechNoir-RAG: Local-First Private Document Intelligence
 
-Tech Noir RAG is a comprehensive, full-stack Retrieval-Augmented Generation system designed for multi-tenant, secure, and blazingly fast document analysis. Built entirely from the ground up, this modern infrastructure bridges a heavy-duty FastAPI backbone with a beautifully designed, immersive "Tech Noir" styled React interface.
+TechNoir-RAG is a self-hosted, local-first Retrieval-Augmented Generation (RAG) system engineered for private, offline document analysis. Run powerful local LLMs and embeddings directly on your own computer with **zero API costs, zero data egress, and zero cloud lock-in**.
 
-Powered by Google's Gemini API, advanced hybrid vector search, and cross-encoder reranking, the platform intelligently contextualizes enterprise documents (PDFs) to deliver highly accurate, hallucination-free generative answers.
-
----
-
-
+Pairing a high-performance **FastAPI** backend with an immersive, cyberpunk-inspired **React** interface, TechNoir-RAG delivers split-pane PDF inspection, interactive source citations, and a tri-stage hybrid retrieval pipeline.
 
 ---
 
-## ✨ System Highlights
+## ⚡ Why Local-First?
 
-### 1. The "Tech Noir" User Interface
-- **Premium Aesthetics**: Fully bespoke UI leveraging a sleek, dark-mode Tech Noir color scheme with vibrant dynamic interactions.
-- **Split-Pane Analysis Workspace**: Allows users to view their active PDF document side-by-side with an interactive, context-aware chatbot.
-- **Dynamic Citation System**: The LLM automatically cites its sources. The UI parses these into interactive links that, when hovered, display the exact source page and Euclidean/cosine distance confidence score of the extracted text.
-- **Interactive Analytics Dashboard**: Beautifully visualizes total ingested documents, active collections, pipeline stages, and system metrics.
-
-### 2. Multi-Tenant Enterprise Security
-- **Per-User Isolation**: Engineered with full multi-tenant architecture. Every file uploaded is securely hashed and namespaced to the unique authenticated user. Users absolutely cannot query, view, or access documents outside their strict namespace.
-- **JWT & Persistent Auth**: Complete login and registration flows powered by bcrypt hashing and secure JWT tokens scoped to local sessions.
-
-### 3. Advanced Tri-Stage Retrieval Pipeline
-Tech Noir RAG doesn't just do basic vector search. It implements a state-of-the-art hybrid pipeline to defeat the edge cases of simple RAG:
-1. **Dense Semantic Search**: Gemini-accelerated embeddings (`models/gemini-embedding-001`) map textual concepts into 3072-dimensional space, capturing high-level meaning and semantic intent.
-2. **Lexical BM25 Search**: Traditional keyword-based retrieval algorithm runs simultaneously to strictly match niche terminology, acronyms, and proper nouns that vectors often miss.
-3. **Reciprocal Rank Fusion (RRF)**: A specialized algorithm statistically merges the dense and lexical results to create a balanced, hyper-accurate candidate pool.
-4. **Cross-Encoder Reranking**: The candidates are piped into a localized NLP model (`ms-marco-MiniLM-L-6-v2`) which reads both the *query* and the *extracted text* side-by-side to score their true pairwise relevance before finally passing the absolute best context to the LLM.
-
-### 4. Robust Document Ingestion
-- **Automated Text Chunking**: High-fidelity PDF processing uses `pdfplumber` to accurately read complex layouts, intelligently chunking text at 800-character limits with contextual overlaps.
-- **Batched Processing**: Automatically batches embedding tasks to safely distribute payload weight when indexing massive corporate documents.
+- 💸 **Zero API Cost**: No token fees, surprise cloud invoices, or subscription quotas. Powered by local models running on your machine via [Ollama](https://ollama.com/).
+- 🔒 **100% Private & Confidential**: Your proprietary PDFs and research never leave your hardware. No third-party servers see your data.
+- 🔀 **Decoupled Providers**: Independently configure your LLM generation (`LLM_PROVIDER`) and embedding model (`EMBEDDING_PROVIDER`). Use Ollama offline, or plug in your own Google Gemini key whenever you choose.
+- 🎯 **Deep Context Verification**: Interactive citations map generative answers back to specific PDF pages with Euclidean/cosine similarity confidence scores.
 
 ---
 
-## 🏗️ Technology Stack
+## ✨ Features & Architecture
 
-**Frontend Framework**
-- React 18 & Vite
-- Tailwind CSS (Custom Design System & Variables)
-- Context API (Auth State Management)
+### 1. Tri-Stage Hybrid Retrieval Pipeline
+- **Dense Vector Search**: ChromaDB semantic matching across document chunks.
+- **Lexical BM25 Search**: Exact keyword indexing for domain-specific acronyms and proper nouns.
+- **Reciprocal Rank Fusion (RRF)**: Merges dense and sparse candidates into a balanced pool.
+- **Cross-Encoder Reranking**: Re-scores candidates using local NLP cross-encoders (`ms-marco-MiniLM-L-6-v2`) before generating the final answer.
 
-**Backend Architecture**
-- FastAPI (Python 3.11 asynchronous web server)
-- SQLite (Auth Storage via WAL mode for high concurrency)
-- ChromaDB (Persistent Vector Database)
-- Google GenAI SDK (LLM Generation & Embedding)
-- Sentence-Transformers (Cross-Encoder inference)
+### 2. Immersive "Tech Noir" Split-Pane Workspace
+- **Dual-Pane Interface**: Read original PDFs in the embedded viewer alongside the AI assistant.
+- **Live Source Citations**: Hover over citations in responses to preview source pages and vector distances.
+- **Chunk Explorer**: Inspect indexed raw chunks and document metadata.
+- **Telemetry Dashboard**: Monitor ingestion statistics, collections, and pipeline metrics.
 
-**Deployment / DevOps**
-- Docker & Docker Compose
-- NGINX Proxy (Configured with high-duration timeouts and 50M payload caps)
+### 3. Hardened Security
+Audited and hardened against application security vulnerabilities (see [audit/security-audit.md](file:///c:/Projects/TechNoir-RAG/audit/security-audit.md)):
+- Strict path traversal defenses on document downloads and metadata resolution.
+- Magic byte (`%PDF-`) validation and streaming upload size limits (25 MB).
+- Prompt boundary protection isolating untrusted document context with XML delimiter tags.
+- Deterministic collection isolation and generic error masking.
 
 ---
 
-## 🚀 Deployment & Installation
+## 🚀 Quickstart (3 Steps)
 
-### Prerequisites
-- Node.js (v20+)
-- Python (3.11+)
-- Docker (Optional but recommended)
-- **Google Gemini API Key** (Retrieve from Google AI Studio)
+### Step 1: Install Ollama & Pull Models
+Install [Ollama](https://ollama.com/) on your computer, then pull your preferred LLM and embedding model:
+```bash
+# Recommended models (fast, accurate, lightweight)
+ollama pull llama3.2
+ollama pull nomic-embed-text
+```
 
-### 1. Environment Setup
-Clone the repository and copy the environment template:
+### Step 2: Configure Environment
+Clone the repository and copy the example environment file:
 ```bash
 git clone https://github.com/your-org/TechNoir-RAG.git
 cd TechNoir-RAG
 cp .env.example .env
 ```
-Update your `.env` with a secure random string and your Gemini Key:
+The default `.env` is pre-configured for local Ollama use:
 ```env
-SECRET_KEY=your_super_secret_jwt_key
-GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-2.5-flash
-EMBED_MODEL=models/gemini-embedding-001
-CORS_ORIGINS=http://localhost:5173,http://localhost:8000,http://localhost
+LLM_PROVIDER=ollama
+EMBEDDING_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.2
+OLLAMA_EMBED_MODEL=nomic-embed-text
+LOCAL_MODE=true
 ```
 
-### Option A: Fully Containerized via Docker (Production / Quickstart)
-The entire platform is configured to spin up securely inside interdependent containers.
+### Step 3: Run the Application
 
+#### Option A: Docker Compose (Recommended)
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
-- Access the web interface at: `http://localhost`
-- Access the backend API directly at: `http://localhost:8000`
+- Open **http://localhost** in your browser.
+- The backend API is available at **http://localhost:8000** (Swagger docs at `/docs`).
 
-### Option B: Local Engineering Mode (Development)
-If you wish to modify the application, run it natively.
-
-**Backend Startup:**
+#### Option B: Native Run (Python + Node.js)
+**Backend:**
 ```bash
-python -m venv backend/venv
-source backend/venv/bin/activate  # Windows: backend\venv\Scripts\activate
-pip install -r requirements.txt
+python -m venv venv
+# On Windows:
+.\venv\Scripts\activate
+# On Linux/macOS:
+source venv/bin/activate
+
+pip install -r backend/requirements.txt
 uvicorn backend.main:app --reload --port 8000
 ```
-**Frontend Startup:**
+
+**Frontend:**
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-Navigate to `http://localhost:5173`. *(The Vite configuration automatically proxies backend networking across localhost directly to the Uvicorn loopback).*
+Navigate to **http://localhost:5173**.
 
 ---
 
-## 📖 API Documentation
+## ⚙️ Configuration & Providers
 
-FastAPI automatically generates interactive Swagger documentation. When the system is running, visit **`http://localhost:8000/docs`**.
+TechNoir-RAG decouples model generation and embeddings. You can configure them independently in `.env`:
 
-### Core Secured Endpoints
-| HTTP | Endpoint | Action |
+| Variable | Default | Description |
 |---|---|---|
-| `POST` | `/auth/register` | Mint a new user account (Requires Email & Password). |
-| `POST` | `/auth/login` | Authenticate and retrieve an active JWT Bearer token. |
-| `POST` | `/upload` | Accept `.pdf` form-data. Chunks, embeds, and scopes the document to the active user's internal ChromaDB namespace. |
-| `POST` | `/query` | Execute the hybrid search pipeline against a target collection and stream a generated LLM answer. |
-| `GET` | `/collections` | Pull a strictly sanitized array of the authenticated user's uploaded active document scopes. |
+| `LLM_PROVIDER` | `ollama` | Provider for answer generation: `ollama` or `gemini` |
+| `EMBEDDING_PROVIDER` | `ollama` | Provider for vector embeddings: `ollama` or `gemini` |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API endpoint (`http://host.docker.internal:11434` in Docker) |
+| `OLLAMA_MODEL` | `llama3.2` | Local model tag (e.g. `llama3.2`, `mistral`, `deepseek-r1`) |
+| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Embedding model tag (e.g. `nomic-embed-text`, `all-minilm`) |
+| `LOCAL_MODE` | `true` | Enables local development fallbacks and single-user optimizations |
+| `AUTH_OPTIONAL` | `false` | Set to `true` to disable login prompts for single-user desktop convenience |
+| `GEMINI_API_KEY` | *(empty)* | Optional: Google Gemini API key if using cloud provider |
+| `MAX_UPLOAD_BYTES` | `26214400` | Maximum upload size (default: 25 MB) |
+| `MAX_INGEST_PAGES` | `100` | Maximum PDF pages ingested per document |
 
 ---
 
-## 🛡️ Best Practices & Known Limitations
-- **Ingestion Quotas**: The system relies on Google's Embedding API limit structure. If you intend to upload textbooks or massive databases (1000+ pages), ensure you upgrade your Google API tier to prevent rate-limit throttling.
-- **Security Check**: Your `users.db` and `chroma_db` directories will store persistent, localized data. In a production cloud push, bind these directories to remote storage volumes, and **never push `.env` to GitHub.**
+## 🔒 Cloud Decommissioning & Cost Elimination
 
-## 🤝 Contributing
-Contributions are heavily encouraged to map out future models (such as integrating local DeepSeek/Llama fallback routines) and expand the frontend telemetry. Open a GitHub Issue for large-scale systemic changes before proposing PRs.
+If you previously deployed TechNoir-RAG to hosted cloud providers (such as Render, Vercel, or Railway) and wish to eliminate API and hosting costs:
+
+1. **Spin Down Hosted Services**:
+   - Log into your Render / Cloud dashboard.
+   - Delete or suspend the Web Service instances running the frontend and backend.
+2. **Revoke Cloud API Keys**:
+   - Go to Google AI Studio or your cloud provider dashboard.
+   - Delete or revoke any API keys previously provisioned for the hosted app to ensure no unexpected billing occurs.
+3. **Migrate Local Data (Optional)**:
+   - If you have existing collections on a hosted instance, copy `users.db` and the `chroma_db/` folder to your local machine.
+4. **Run 100% Free Locally**:
+   - By following the Quickstart above with Ollama, your application operates entirely on your local machine with zero recurring expense.
+
+---
+
+## 🧪 Testing
+
+Run the automated test suite (including API regression tests, security verification, and provider decoupling):
+```bash
+python -m unittest discover -s backend/tests -p "test_*.py"
+```
+
+---
+
+## 📜 License
+
+MIT License. Built for private, open, and accessible document intelligence.

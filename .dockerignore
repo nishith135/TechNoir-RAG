@@ -17,6 +17,7 @@ frontend/dist/
 # Environment and Data
 .env
 chroma_db/
+pdf_store/
 users.db
 *.db
 

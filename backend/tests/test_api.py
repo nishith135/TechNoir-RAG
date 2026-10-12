@@ -1,33 +1,39 @@
-import pytest
+import unittest
 from fastapi.testclient import TestClient
 from backend.main import app
 
 client = TestClient(app)
 
-def test_root():
-    response = client.get("/")
-    assert response.status_code == 200
-    assert "TechNoir RAG API" in response.json().get("message", "")
 
-def test_health():
-    response = client.get("/health")
-    assert response.status_code == 200
-    assert response.json()["status"] == "ok"
+class TestAPI(unittest.TestCase):
+    def test_root(self):
+        response = client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("TechNoir RAG API", response.json().get("message", ""))
 
-def test_version():
-    response = client.get("/version")
-    assert response.status_code == 200
-    assert "version" in response.json()
+    def test_health(self):
+        response = client.get("/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "ok")
 
-def test_unauthenticated_me():
-    response = client.get("/auth/me")
-    assert response.status_code == 401  # Token missing or invalid usually throws 401 here
+    def test_version(self):
+        response = client.get("/version")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("version", response.json())
 
-def test_unauthenticated_collections():
-    response = client.get("/collections")
-    assert response.status_code == 401
+    def test_unauthenticated_me(self):
+        response = client.get("/auth/me")
+        self.assertEqual(response.status_code, 401)
 
-def test_login_invalid_credentials():
-    response = client.post("/auth/login", json={"email": "wrong@example.com", "password": "wrong"})
-    assert response.status_code == 401
-    assert "detail" in response.json()
+    def test_unauthenticated_collections(self):
+        response = client.get("/collections")
+        self.assertEqual(response.status_code, 401)
+
+    def test_login_invalid_credentials(self):
+        response = client.post("/auth/login", json={"email": "wrong@example.com", "password": "wrong"})
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("detail", response.json())
+
+
+if __name__ == "__main__":
+    unittest.main()

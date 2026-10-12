@@ -2,25 +2,18 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-import chromadb
-from rank_bm25 import BM25Okapi
+try:
+    import chromadb
+except ImportError:
+    chromadb = None
 
-from backend.config import CHROMA_PERSIST_PATH, EMBED_MODEL, GEMINI_API_KEY
-import google.generativeai as genai
+try:
+    from rank_bm25 import BM25Okapi
+except ImportError:
+    BM25Okapi = None
 
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-
-def _embed_query(query: str) -> List[float]:
-    """Embed a single query using Google Gemini."""
-    if not query:
-        return []
-    result = genai.embed_content(
-        model=EMBED_MODEL,
-        content=query,
-        task_type="retrieval_query"
-    )
-    return result['embedding']
+from backend.config import CHROMA_PERSIST_PATH
+from backend.providers import embed_query_text
 
 
 def retrieve_chunks(query: str, collection_name: str, k: int = 5) -> list[dict]:
@@ -30,7 +23,12 @@ def retrieve_chunks(query: str, collection_name: str, k: int = 5) -> list[dict]:
     if not query or not query.strip():
         return []
 
-    query_embedding = _embed_query(query)
+    if chromadb is None:
+        return []
+
+    query_embedding = embed_query_text(query)
+    if not query_embedding:
+        return []
 
     chroma_client = chromadb.PersistentClient(path=CHROMA_PERSIST_PATH)
     try:
